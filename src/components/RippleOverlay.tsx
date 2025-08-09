@@ -48,6 +48,8 @@ export const RippleOverlay: React.FC<RippleOverlayProps> = ({ children, config }
   const dprRef = useRef<number>(Math.max(1, window.devicePixelRatio || 1));
   const capturingRef = useRef<Promise<HTMLCanvasElement> | null>(null);
   const lastSnapshotRef = useRef<HTMLCanvasElement | null>(null);
+  const speedRef = useRef<number>(RIPPLE_DEFAULTS.speed);
+  const fadeStartedRef = useRef(false);
 
   const effective: RippleConfig = useMemo(() => ({ ...RIPPLE_DEFAULTS, ...(config || {}) }), [config]);
 
@@ -71,6 +73,8 @@ export const RippleOverlay: React.FC<RippleOverlayProps> = ({ children, config }
     });
     if (!gl) return;
     glRef.current = gl;
+    canvas.style.transition = "opacity 140ms ease-out";
+    canvas.style.opacity = "0";
 
     // Program
     const program = createProgram(gl, rippleVertex, rippleFragment);
@@ -220,17 +224,24 @@ export const RippleOverlay: React.FC<RippleOverlayProps> = ({ children, config }
     gl.uniform1f(u.u_time, tSec);
     gl.uniform1f(u.u_duration, effective.duration);
     gl.uniform1f(u.u_strength, effective.strength * dprRef.current);
-    gl.uniform1f(u.u_speed, effective.speed);
+    gl.uniform1f(u.u_speed, speedRef.current);
     gl.uniform1f(u.u_width, effective.width);
 
     gl.drawArrays(gl.TRIANGLES, 0, 3);
 
     if (tSec >= effective.duration) {
-      if (rafRef.current) cancelAnimationFrame(rafRef.current);
-      rafRef.current = null;
-      animatingRef.current = false;
-      // CSS fade safety, though shader alpha already fades
-      canvas.style.opacity = "0";
+      if (!fadeStartedRef.current) {
+        fadeStartedRef.current = true;
+        canvas.style.opacity = "0";
+        const onFade = () => {
+          if (rafRef.current) cancelAnimationFrame(rafRef.current!);
+          rafRef.current = null;
+          animatingRef.current = false;
+          fadeStartedRef.current = false;
+          canvas.removeEventListener("transitionend", onFade as any);
+        };
+        canvas.addEventListener("transitionend", onFade as any, { once: true } as any);
+      }
     }
   }, [effective.duration, effective.speed, effective.strength, effective.width]);
 
@@ -244,20 +255,34 @@ export const RippleOverlay: React.FC<RippleOverlayProps> = ({ children, config }
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    // Start anim
-    canvas.style.opacity = "1";
-    canvas.style.transition = "opacity 200ms ease-out";
-    startTimeRef.current = performance.now();
-    if (!rafRef.current) rafRef.current = requestAnimationFrame(drawFrame);
+    // Compute dynamic speed so the ring reaches the farthest corner by end
+    const W = canvas.width;
+    const H = canvas.height;
+    const cxPx = centerUVRef.current.x * W;
+    const cyPx = centerUVRef.current.y * H;
+    const d1 = Math.hypot(cxPx - 0,   cyPx - 0);
+    const d2 = Math.hypot(cxPx - W,   cyPx - 0);
+    const d3 = Math.hypot(cxPx - 0,   cyPx - H);
+    const d4 = Math.hypot(cxPx - W,   cyPx - H);
+    const maxDist = Math.max(d1, d2, d3, d4) + 2.0 * dprRef.current; // small margin
+    speedRef.current = maxDist / effective.duration;
 
-    // Reuse last snapshot if available, otherwise capture; if capturing, upload when done
+    // Use last snapshot immediately; only capture new one when overlay is hidden and not animating
     if (lastSnapshotRef.current) {
       uploadTexture(lastSnapshotRef.current);
     }
-    captureSnapshot().then((snap) => {
-      uploadTexture(snap);
-    });
-  }, [captureSnapshot, drawFrame, motionEnabled, uploadTexture]);
+    if (!animatingRef.current && (canvas.style.opacity === "" || canvas.style.opacity === "0")) {
+      captureSnapshot().then((snap) => {
+        uploadTexture(snap);
+      });
+    }
+
+    // Start animation
+    animatingRef.current = true;
+    startTimeRef.current = performance.now();
+    canvas.style.opacity = "1";
+    if (!rafRef.current) rafRef.current = requestAnimationFrame(drawFrame);
+  }, [captureSnapshot, drawFrame, motionEnabled, uploadTexture, effective.duration]);
 
   // Global pointer trigger (click/tap anywhere)
   useEffect(() => {
