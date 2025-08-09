@@ -3,6 +3,31 @@ import html2canvas from "html2canvas";
 import { RippleContext, RIPPLE_DEFAULTS, RippleConfig, RippleTrigger } from "@/hooks/useRipple";
 import { rippleVertex, rippleFragment } from "@/lib/shaders/ripple";
 
+function getViewportMetrics() {
+  const vv = window.visualViewport as VisualViewport | undefined;
+  const DPR = Math.max(1, window.devicePixelRatio || 1);
+  if (vv) {
+    return {
+      DPR,
+      cssW: vv.width,
+      cssH: vv.height,
+      pageX: vv.pageLeft,
+      pageY: vv.pageTop,
+      offX: vv.offsetLeft || 0,
+      offY: vv.offsetTop || 0,
+    };
+  }
+  return {
+    DPR,
+    cssW: window.innerWidth,
+    cssH: window.innerHeight,
+    pageX: window.scrollX,
+    pageY: window.scrollY,
+    offX: 0,
+    offY: 0,
+  };
+}
+
 function createShader(gl: WebGLRenderingContext, type: number, source: string) {
   const shader = gl.createShader(type)!;
   gl.shaderSource(shader, source);
@@ -125,9 +150,10 @@ export const RippleOverlay: React.FC<RippleOverlayProps> = ({ children, config }
 
     // Initial sizing
     const resize = () => {
-      dprRef.current = Math.max(1, window.devicePixelRatio || 1);
-      const w = Math.floor(window.innerWidth * dprRef.current);
-      const h = Math.floor(window.innerHeight * dprRef.current);
+      const { DPR, cssW, cssH } = getViewportMetrics();
+      dprRef.current = DPR;
+      const w = Math.floor(cssW * DPR);
+      const h = Math.floor(cssH * DPR);
       if (canvas.width !== w) canvas.width = w;
       if (canvas.height !== h) canvas.height = h;
       canvas.style.width = "100vw";
@@ -136,9 +162,17 @@ export const RippleOverlay: React.FC<RippleOverlayProps> = ({ children, config }
     };
     resize();
     window.addEventListener("resize", resize);
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener("resize", resize);
+      window.visualViewport.addEventListener("scroll", resize);
+    }
 
     return () => {
       window.removeEventListener("resize", resize);
+      if (window.visualViewport) {
+        window.visualViewport.removeEventListener("resize", resize);
+        window.visualViewport.removeEventListener("scroll", resize);
+      }
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
       gl.deleteTexture(textureRef.current);
       gl.deleteProgram(programRef.current);
@@ -177,17 +211,18 @@ export const RippleOverlay: React.FC<RippleOverlayProps> = ({ children, config }
       scale: DPR,
     }).then((pageCanvas) => {
       // Copy only the current viewport slice into a DPR-sized canvas
+      const { DPR: d2, cssW, cssH, pageX, pageY } = getViewportMetrics();
       const out = document.createElement("canvas");
-      const w = Math.floor(window.innerWidth * DPR);
-      const h = Math.floor(window.innerHeight * DPR);
+      const w = Math.floor(cssW * d2);
+      const h = Math.floor(cssH * d2);
       out.width = w;
       out.height = h;
       const ctx = out.getContext("2d")!;
 
-      const sx = Math.floor(window.scrollX * DPR);
-      const sy = Math.floor(window.scrollY * DPR);
-      const sw = Math.floor(window.innerWidth * DPR);
-      const sh = Math.floor(window.innerHeight * DPR);
+      const sx = Math.floor(pageX * d2);
+      const sy = Math.floor(pageY * d2);
+      const sw = w;
+      const sh = h;
 
       ctx.drawImage(pageCanvas, sx, sy, sw, sh, 0, 0, w, h);
       lastSnapshotRef.current = out;
@@ -269,11 +304,13 @@ export const RippleOverlay: React.FC<RippleOverlayProps> = ({ children, config }
     const gl = glRef.current;
     if (!canvas || !gl) return;
 
-    const w = window.innerWidth;
-    const h = window.innerHeight;
+    const { cssW, cssH, offX, offY } = getViewportMetrics();
 
-    // 1) Set the click center (no Y inversion)
-    centerUVRef.current = { x: clientX / w, y: clientY / h };
+    // 1) Set the click center in visual-viewport space
+    centerUVRef.current = {
+      x: (clientX - offX) / cssW,
+      y: (clientY - offY) / cssH,
+    };
 
     const startAnim = () => {
       // 3) Compute dynamic speed so radius reaches the farthest corner by end
