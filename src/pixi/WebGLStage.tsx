@@ -1,5 +1,6 @@
 import React from "react";
-import { Stage, Container, useTick, Graphics, Text } from "@pixi/react";
+import * as ReactPixi from "@pixi/react";
+const { Stage, Container, useTick, Graphics, Text } = ReactPixi;
 import { Application, Filter, Renderer, FederatedPointerEvent, Container as PixiContainer } from "pixi.js";
 
 // Device pixel ratio helper
