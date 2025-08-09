@@ -111,7 +111,40 @@ All colors MUST be HSL.
 
   body {
     @apply bg-background text-foreground;
-    background: hsl(var(--debug-bg));
+    background-color: hsl(var(--debug-bg));
+    background-image:
+      /* minor vertical */
+      repeating-linear-gradient(
+        to right,
+        hsl(0 0% 100% / 0.10) 0,
+        hsl(0 0% 100% / 0.10) 1px,
+        transparent 1px,
+        transparent 100px
+      ),
+      /* minor horizontal */
+      repeating-linear-gradient(
+        to bottom,
+        hsl(0 0% 100% / 0.10) 0,
+        hsl(0 0% 100% / 0.10) 1px,
+        transparent 1px,
+        transparent 100px
+      ),
+      /* major vertical */
+      repeating-linear-gradient(
+        to right,
+        hsl(0 0% 100% / 0.18) 0,
+        hsl(0 0% 100% / 0.18) 1px,
+        transparent 1px,
+        transparent 500px
+      ),
+      /* major horizontal */
+      repeating-linear-gradient(
+        to bottom,
+        hsl(0 0% 100% / 0.18) 0,
+        hsl(0 0% 100% / 0.18) 1px,
+        transparent 1px,
+        transparent 500px
+      );
     color: hsl(0 0% 100%);
   }
 

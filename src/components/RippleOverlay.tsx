@@ -261,21 +261,6 @@ export const RippleOverlay: React.FC<RippleOverlayProps> = ({ children, config }
       // Draw the cropped page content
       ctx.drawImage(pageCanvas, sx, sy, sw, sh, 0, 0, w, h);
 
-      // Overlay debug grid (CSS px spacing scaled by DPR)
-      ctx.strokeStyle = GRID_COLOR;
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      const spacing = GRID_SPACING_CSS_PX * d2;
-      for (let x = 0; x <= w; x += spacing) {
-        ctx.moveTo(x + 0.5, 0);
-        ctx.lineTo(x + 0.5, h);
-      }
-      for (let y = 0; y <= h; y += spacing) {
-        ctx.moveTo(0, y + 0.5);
-        ctx.lineTo(w, y + 0.5);
-      }
-      ctx.stroke();
-
       lastSnapshotRef.current = out;
       return out;
     }).finally(() => {
