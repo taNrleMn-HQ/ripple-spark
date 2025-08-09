@@ -160,6 +160,12 @@ export const RippleOverlay: React.FC<RippleOverlayProps> = ({ children, config }
     if (capturingRef.current) return capturingRef.current;
 
     const scale = Math.min(1.5, window.devicePixelRatio || 1);
+
+    // Ensure overlay isn't captured
+    const overlay = canvasRef.current;
+    const prevOpacity = overlay?.style.opacity;
+    if (overlay) overlay.style.opacity = "0";
+
     const promise = html2canvas(document.documentElement, {
       backgroundColor: null,
       scale,
@@ -182,6 +188,7 @@ export const RippleOverlay: React.FC<RippleOverlayProps> = ({ children, config }
       return out;
     }).finally(() => {
       capturingRef.current = null;
+      if (overlay && prevOpacity !== undefined) overlay.style.opacity = prevOpacity!;
     });
 
     capturingRef.current = promise;
