@@ -242,6 +242,27 @@ export const RippleOverlay: React.FC<RippleOverlayProps> = ({ children, config }
     }
   }, [effective.duration, effective.speed, effective.strength, effective.width]);
 
+  const renderOnce = useCallback((tSec: number) => {
+    const gl = glRef.current;
+    const canvas = canvasRef.current;
+    if (!gl || !canvas) return;
+    gl.useProgram(programRef.current);
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+
+    const u = uniformsRef.current;
+    gl.uniform1i(u.u_tex, 0);
+    gl.uniform2f(u.u_res, canvas.width, canvas.height);
+    gl.uniform2f(u.u_center, centerUVRef.current.x, centerUVRef.current.y);
+    gl.uniform1f(u.u_time, tSec);
+    gl.uniform1f(u.u_duration, effective.duration);
+    gl.uniform1f(u.u_strength, effective.strength * dprRef.current);
+    gl.uniform1f(u.u_speed, speedRef.current);
+    gl.uniform1f(u.u_width, effective.width);
+
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+  }, [effective.duration, effective.strength, effective.width]);
+
   const triggerRipple: RippleTrigger = useCallback(({ clientX, clientY }) => {
     if (!motionEnabled) return;
     const canvas = canvasRef.current;
@@ -275,6 +296,8 @@ export const RippleOverlay: React.FC<RippleOverlayProps> = ({ children, config }
       // 4) Start animation only now that texture & uniforms are ready
       startTimeRef.current = performance.now();
       animatingRef.current = true;
+      // Pre-render one frame before revealing the canvas to avoid first-frame flash
+      renderOnce(0.0001);
       canvas.style.opacity = "1";
       if (!rafRef.current) rafRef.current = requestAnimationFrame(drawFrame);
     };
@@ -316,7 +339,7 @@ export const RippleOverlay: React.FC<RippleOverlayProps> = ({ children, config }
       {children}
       <canvas
         ref={canvasRef}
-        className="fixed inset-0 pointer-events-none z-[9999] select-none"
+        className="fixed inset-0 pointer-events-none z-[9999] select-none will-change-[opacity]"
         aria-hidden
       />
     </RippleContext.Provider>

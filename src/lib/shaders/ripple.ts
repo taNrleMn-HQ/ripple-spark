@@ -52,6 +52,6 @@ void main(){
     texture2D(u_tex, uv_g).g,
     texture2D(u_tex, uv_b).b
   );
-  gl_FragColor = vec4(color, play);
+  gl_FragColor = vec4(color, 1.0);
 }
 `;
