@@ -2,6 +2,7 @@ import React, { PropsWithChildren, useCallback, useEffect, useMemo, useRef, useS
 import html2canvas from "html2canvas";
 import { RippleContext, RIPPLE_DEFAULTS, RippleConfig, RippleTrigger } from "@/hooks/useRipple";
 import { rippleVertex, rippleFragment } from "@/lib/shaders/ripple";
+import { createPortal } from "react-dom";
 
 function getViewportMetrics() {
   const vv = window.visualViewport as VisualViewport | undefined;
@@ -76,6 +77,10 @@ export const RippleOverlay: React.FC<RippleOverlayProps> = ({ children, config }
   const speedRef = useRef<number>(RIPPLE_DEFAULTS.speed);
   const fadeStartedRef = useRef(false);
 
+  // Portal root
+  const portalRef = useRef<HTMLDivElement | null>(null);
+  const [portalReady, setPortalReady] = useState(false);
+
   const effective: RippleConfig = useMemo(() => ({ ...RIPPLE_DEFAULTS, ...(config || {}) }), [config]);
 
   // Reduced motion
@@ -88,9 +93,32 @@ export const RippleOverlay: React.FC<RippleOverlayProps> = ({ children, config }
     return () => mql.removeEventListener("change", update);
   }, []);
 
+  // Create a portal container at the top of document.body
+  useEffect(() => {
+    const el = document.createElement("div");
+    el.id = "ripple-overlay-root";
+    Object.assign(el.style as any, {
+      position: "fixed",
+      inset: "0",
+      zIndex: "2147483647",
+      pointerEvents: "none",
+    });
+    document.body.appendChild(el);
+    portalRef.current = el;
+    setPortalReady(true);
+
+    return () => {
+      if (portalRef.current) document.body.removeChild(portalRef.current);
+      portalRef.current = null;
+      setPortalReady(false);
+    };
+  }, []);
+  
   // Setup GL
   useEffect(() => {
-    const canvas = canvasRef.current!;
+    const canvas = canvasRef.current;
+    if (!canvas || !portalReady) return;
+
     const gl = canvas.getContext("webgl", {
       alpha: true,
       antialias: false,
@@ -177,7 +205,7 @@ export const RippleOverlay: React.FC<RippleOverlayProps> = ({ children, config }
       gl.deleteTexture(textureRef.current);
       gl.deleteProgram(programRef.current);
     };
-  }, []);
+  }, [portalReady]);
 
   const uploadTexture = useCallback((snapCanvas: HTMLCanvasElement) => {
     const gl = glRef.current;
@@ -374,11 +402,17 @@ export const RippleOverlay: React.FC<RippleOverlayProps> = ({ children, config }
   return (
     <RippleContext.Provider value={{ triggerRipple, enabled: motionEnabled, config: effective }}>
       {children}
-      <canvas
-        ref={canvasRef}
-        className="fixed inset-0 pointer-events-none z-[9999] select-none will-change-[opacity]"
-        aria-hidden
-      />
+      {portalReady && portalRef.current
+        ? createPortal(
+            <canvas
+              ref={canvasRef}
+              className="fixed inset-0 pointer-events-none select-none will-change-[opacity]"
+              style={{ zIndex: 2147483647 }}
+              aria-hidden
+            />,
+            portalRef.current
+          )
+        : null}
     </RippleContext.Provider>
   );
 };
