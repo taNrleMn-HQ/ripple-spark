@@ -6,12 +6,15 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import Index from "./pages/Index";
 import NotFound from "./pages/NotFound";
 import { RippleOverlay } from "@/components/RippleOverlay";
+import GridOverlay from "@/components/GridOverlay";
 
 const queryClient = new QueryClient();
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
+      {/* Grid sits above body but under ripple (controlled by portal z-index) */}
+      <GridOverlay />
       <RippleOverlay>
         <Toaster />
         <Sonner />
