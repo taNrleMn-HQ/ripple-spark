@@ -159,7 +159,7 @@ export const RippleOverlay: React.FC<RippleOverlayProps> = ({ children, config }
     // If already capturing, return the same promise
     if (capturingRef.current) return capturingRef.current;
 
-    const scale = Math.min(1.5, window.devicePixelRatio || 1);
+    const DPR = Math.max(1, window.devicePixelRatio || 1);
 
     // Ensure overlay isn't captured
     const overlay = canvasRef.current;
@@ -168,22 +168,27 @@ export const RippleOverlay: React.FC<RippleOverlayProps> = ({ children, config }
 
     const promise = html2canvas(document.documentElement, {
       backgroundColor: null,
-      scale,
+      scale: DPR, // match overlay DPR
       useCORS: true,
       windowWidth: window.innerWidth,
       windowHeight: window.innerHeight,
       scrollX: window.scrollX,
       scrollY: window.scrollY,
-    }).then((snap) => {
-      // Normalize to canvas DPR size
-      const dpr = dprRef.current;
+    }).then((pageCanvas) => {
+      // Copy only the current viewport slice into a DPR-sized canvas
       const out = document.createElement("canvas");
-      const w = Math.floor(window.innerWidth * dpr);
-      const h = Math.floor(window.innerHeight * dpr);
+      const w = Math.floor(window.innerWidth * DPR);
+      const h = Math.floor(window.innerHeight * DPR);
       out.width = w;
       out.height = h;
       const ctx = out.getContext("2d")!;
-      ctx.drawImage(snap, 0, 0, snap.width, snap.height, 0, 0, w, h);
+
+      const sx = Math.floor(window.scrollX * DPR);
+      const sy = Math.floor(window.scrollY * DPR);
+      const sw = Math.floor(window.innerWidth * DPR);
+      const sh = Math.floor(window.innerHeight * DPR);
+
+      ctx.drawImage(pageCanvas, sx, sy, sw, sh, 0, 0, w, h);
       lastSnapshotRef.current = out;
       return out;
     }).finally(() => {
