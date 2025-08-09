@@ -53,6 +53,9 @@ All colors MUST be HSL.
     --sidebar-border: 220 13% 91%;
 
     --sidebar-ring: 217.2 91.2% 59.8%;
+
+    /* Debug background to reveal overlay gaps (medium gray-blue) */
+    --debug-bg: 210 30% 20%;
   }
 
   .dark {
@@ -99,11 +102,19 @@ All colors MUST be HSL.
     @apply border-border;
   }
 
-  html {
-    scrollbar-gutter: stable;
-  }
+  /* Full-height doc, stable gutter to avoid width nudges */
+  html, body, #root { height: 100%; }
+  html { scrollbar-gutter: stable; }
+
+  /* Avoid any accidental clipping/containing blocks on the viewport */
+  html, body { overflow: auto; transform: none !important; filter: none !important; perspective: none !important; }
 
   body {
     @apply bg-background text-foreground;
+    background: hsl(var(--debug-bg));
+    color: hsl(0 0% 100%);
   }
+
+  /* Smoother fade hint for the overlay */
+  #ripple-overlay { will-change: opacity; }
 }

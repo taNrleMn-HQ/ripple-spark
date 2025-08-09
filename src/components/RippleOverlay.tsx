@@ -102,6 +102,8 @@ export const RippleOverlay: React.FC<RippleOverlayProps> = ({ children, config }
       inset: "0",
       zIndex: "2147483647",
       pointerEvents: "none",
+      overflow: "visible",
+      contain: "layout style size",
     });
     document.body.appendChild(el);
     portalRef.current = el;
@@ -405,9 +407,10 @@ export const RippleOverlay: React.FC<RippleOverlayProps> = ({ children, config }
       {portalReady && portalRef.current
         ? createPortal(
             <canvas
+              id="ripple-overlay"
               ref={canvasRef}
-              className="fixed inset-0 pointer-events-none select-none will-change-[opacity]"
-              style={{ zIndex: 2147483647 }}
+              className="fixed inset-0 pointer-events-none select-none"
+              style={{ zIndex: 2147483647, width: "100vw", height: "100vh" }}
               aria-hidden
             />,
             portalRef.current
