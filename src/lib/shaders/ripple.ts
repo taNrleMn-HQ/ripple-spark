@@ -24,11 +24,6 @@ float ring(float d, float r, float w){
   return exp(-x*x*4.0);
 }
 
-// Flip V for DOM snapshot textures without relying on UNPACK_FLIP_Y_WEBGL
-vec2 flipY(vec2 uv){
-  return vec2(uv.x, 1.0 - uv.y);
-}
-
 void main(){
   vec2 uv = v_uv;
   vec2 px = uv * u_res;
@@ -44,9 +39,9 @@ void main(){
   vec2 dir = normalize(px - cpx + 0.0001);
   float disp = u_strength * k;
 
-  vec2 uv_r = flipY((px + dir * (disp * 1.00)) / u_res);
-  vec2 uv_g = flipY((px + dir * (disp * 0.80)) / u_res);
-  vec2 uv_b = flipY((px + dir * (disp * 0.60)) / u_res);
+  vec2 uv_r = (px + dir * (disp * 1.00)) / u_res;
+  vec2 uv_g = (px + dir * (disp * 0.80)) / u_res;
+  vec2 uv_b = (px + dir * (disp * 0.60)) / u_res;
 
   float micro = 0.2 * sin((d - radius) * 0.05) * k;
   uv_r += dir * micro / u_res;

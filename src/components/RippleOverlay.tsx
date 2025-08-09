@@ -73,6 +73,7 @@ export const RippleOverlay: React.FC<RippleOverlayProps> = ({ children, config }
     });
     if (!gl) return;
     glRef.current = gl;
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
     canvas.style.transition = "opacity 140ms ease-out";
     canvas.style.opacity = "0";
 
@@ -172,12 +173,8 @@ export const RippleOverlay: React.FC<RippleOverlayProps> = ({ children, config }
 
     const promise = html2canvas(document.documentElement, {
       backgroundColor: null,
-      scale: DPR, // match overlay DPR
       useCORS: true,
-      windowWidth: window.innerWidth,
-      windowHeight: window.innerHeight,
-      scrollX: window.scrollX,
-      scrollY: window.scrollY,
+      scale: DPR,
     }).then((pageCanvas) => {
       // Copy only the current viewport slice into a DPR-sized canvas
       const out = document.createElement("canvas");
@@ -247,41 +244,62 @@ export const RippleOverlay: React.FC<RippleOverlayProps> = ({ children, config }
 
   const triggerRipple: RippleTrigger = useCallback(({ clientX, clientY }) => {
     if (!motionEnabled) return;
+    const canvas = canvasRef.current;
+    const gl = glRef.current;
+    if (!canvas || !gl) return;
 
     const w = window.innerWidth;
     const h = window.innerHeight;
-    centerUVRef.current = { x: clientX / w, y: 1 - clientY / h };
 
-    const canvas = canvasRef.current;
-    if (!canvas) return;
+    // 1) Set the click center (no Y inversion)
+    centerUVRef.current = { x: clientX / w, y: clientY / h };
 
-    // Compute dynamic speed so the ring reaches the farthest corner by end
-    const W = canvas.width;
-    const H = canvas.height;
-    const cxPx = centerUVRef.current.x * W;
-    const cyPx = centerUVRef.current.y * H;
-    const d1 = Math.hypot(cxPx - 0,   cyPx - 0);
-    const d2 = Math.hypot(cxPx - W,   cyPx - 0);
-    const d3 = Math.hypot(cxPx - 0,   cyPx - H);
-    const d4 = Math.hypot(cxPx - W,   cyPx - H);
-    const maxDist = Math.max(d1, d2, d3, d4) + 2.0 * dprRef.current; // small margin
-    speedRef.current = maxDist / effective.duration;
+    const startAnim = () => {
+      // 3) Compute dynamic speed so radius reaches the farthest corner by end
+      const W = canvas.width;   // device px
+      const H = canvas.height;
+      const cxPx = centerUVRef.current.x * W;
+      const cyPx = centerUVRef.current.y * H;
 
-    // Use last snapshot immediately; only capture new one when overlay is hidden and not animating
-    if (lastSnapshotRef.current) {
-      uploadTexture(lastSnapshotRef.current);
+      const d1 = Math.hypot(cxPx - 0,   cyPx - 0);
+      const d2 = Math.hypot(cxPx - W,   cyPx - 0);
+      const d3 = Math.hypot(cxPx - 0,   cyPx - H);
+      const d4 = Math.hypot(cxPx - W,   cyPx - H);
+      const DPR = dprRef.current;
+      const maxDist = Math.max(d1, d2, d3, d4) + 2.0 * DPR;
+
+      // Slight overshoot so it fully clears screen by end of duration
+      const overshoot = 1.06;
+      speedRef.current = (maxDist * overshoot) / effective.duration;
+
+      // 4) Start animation only now that texture & uniforms are ready
+      startTimeRef.current = performance.now();
+      animatingRef.current = true;
+      canvas.style.opacity = "1";
+      if (!rafRef.current) rafRef.current = requestAnimationFrame(drawFrame);
+    };
+
+    // 2) Ensure we have a snapshot BEFORE we show the overlay the first time
+    let snap = lastSnapshotRef.current;
+    if (!snap) {
+      captureSnapshot()
+        .then((s) => {
+          uploadTexture(s);
+          startAnim();
+        })
+        .catch(() => {});
+      return;
+    } else {
+      uploadTexture(snap);
     }
+
+    // 5) Start now that texture is ready
+    startAnim();
+
+    // 6) Fire off a fresh snapshot in the background for the next tap (only when overlay is hidden)
     if (!animatingRef.current && (canvas.style.opacity === "" || canvas.style.opacity === "0")) {
-      captureSnapshot().then((snap) => {
-        uploadTexture(snap);
-      });
+      captureSnapshot().then(uploadTexture).catch(() => {});
     }
-
-    // Start animation
-    animatingRef.current = true;
-    startTimeRef.current = performance.now();
-    canvas.style.opacity = "1";
-    if (!rafRef.current) rafRef.current = requestAnimationFrame(drawFrame);
   }, [captureSnapshot, drawFrame, motionEnabled, uploadTexture, effective.duration]);
 
   // Global pointer trigger (click/tap anywhere)
