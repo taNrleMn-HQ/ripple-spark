@@ -1,0 +1,269 @@
+import React, { PropsWithChildren, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import html2canvas from "html2canvas";
+import { RippleContext, RIPPLE_DEFAULTS, RippleConfig, RippleTrigger } from "@/hooks/useRipple";
+import { rippleVertex, rippleFragment } from "@/lib/shaders/ripple";
+
+function createShader(gl: WebGLRenderingContext, type: number, source: string) {
+  const shader = gl.createShader(type)!;
+  gl.shaderSource(shader, source);
+  gl.compileShader(shader);
+  if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+    const info = gl.getShaderInfoLog(shader);
+    gl.deleteShader(shader);
+    throw new Error("Shader compile failed: " + info);
+  }
+  return shader;
+}
+
+function createProgram(gl: WebGLRenderingContext, vs: string, fs: string) {
+  const vert = createShader(gl, gl.VERTEX_SHADER, vs);
+  const frag = createShader(gl, gl.FRAGMENT_SHADER, fs);
+  const program = gl.createProgram()!;
+  gl.attachShader(program, vert);
+  gl.attachShader(program, frag);
+  gl.linkProgram(program);
+  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+    const info = gl.getProgramInfoLog(program);
+    gl.deleteProgram(program);
+    throw new Error("Program link failed: " + info);
+  }
+  gl.deleteShader(vert);
+  gl.deleteShader(frag);
+  return program;
+}
+
+export type RippleOverlayProps = PropsWithChildren<{ config?: Partial<RippleConfig> }>;
+
+export const RippleOverlay: React.FC<RippleOverlayProps> = ({ children, config }) => {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const glRef = useRef<WebGLRenderingContext | null>(null);
+  const programRef = useRef<WebGLProgram | null>(null);
+  const attribPosLocRef = useRef<number>(-1);
+  const uniformsRef = useRef<Record<string, WebGLUniformLocation | null>>({});
+  const textureRef = useRef<WebGLTexture | null>(null);
+  const rafRef = useRef<number | null>(null);
+  const animatingRef = useRef(false);
+  const startTimeRef = useRef(0);
+  const centerUVRef = useRef<{ x: number; y: number }>({ x: 0.5, y: 0.5 });
+  const dprRef = useRef<number>(Math.max(1, window.devicePixelRatio || 1));
+  const capturingRef = useRef<Promise<HTMLCanvasElement> | null>(null);
+  const lastSnapshotRef = useRef<HTMLCanvasElement | null>(null);
+
+  const effective: RippleConfig = useMemo(() => ({ ...RIPPLE_DEFAULTS, ...(config || {}) }), [config]);
+
+  // Reduced motion
+  const [motionEnabled, setMotionEnabled] = useState(true);
+  useEffect(() => {
+    const mql = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const update = () => setMotionEnabled(!mql.matches);
+    update();
+    mql.addEventListener("change", update);
+    return () => mql.removeEventListener("change", update);
+  }, []);
+
+  // Setup GL
+  useEffect(() => {
+    const canvas = canvasRef.current!;
+    const gl = canvas.getContext("webgl", {
+      alpha: true,
+      antialias: false,
+      preserveDrawingBuffer: false,
+    });
+    if (!gl) return;
+    glRef.current = gl;
+
+    // Program
+    const program = createProgram(gl, rippleVertex, rippleFragment);
+    programRef.current = program;
+    gl.useProgram(program);
+
+    // Fullscreen triangle
+    const posLoc = gl.getAttribLocation(program, "a_pos");
+    attribPosLocRef.current = posLoc;
+    const vbo = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+    const verts = new Float32Array([
+      -1, -1,
+      3, -1,
+      -1, 3,
+    ]);
+    gl.bufferData(gl.ARRAY_BUFFER, verts, gl.STATIC_DRAW);
+    gl.enableVertexAttribArray(posLoc);
+    gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
+
+    // Uniforms
+    uniformsRef.current = {
+      u_tex: gl.getUniformLocation(program, "u_tex"),
+      u_res: gl.getUniformLocation(program, "u_res"),
+      u_center: gl.getUniformLocation(program, "u_center"),
+      u_time: gl.getUniformLocation(program, "u_time"),
+      u_duration: gl.getUniformLocation(program, "u_duration"),
+      u_strength: gl.getUniformLocation(program, "u_strength"),
+      u_speed: gl.getUniformLocation(program, "u_speed"),
+      u_width: gl.getUniformLocation(program, "u_width"),
+    };
+
+    // Texture setup
+    const tex = gl.createTexture();
+    textureRef.current = tex;
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+
+    // Blending for alpha fade
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    gl.clearColor(0, 0, 0, 0);
+
+    // Initial sizing
+    const resize = () => {
+      dprRef.current = Math.max(1, window.devicePixelRatio || 1);
+      const w = Math.floor(window.innerWidth * dprRef.current);
+      const h = Math.floor(window.innerHeight * dprRef.current);
+      if (canvas.width !== w) canvas.width = w;
+      if (canvas.height !== h) canvas.height = h;
+      canvas.style.width = "100vw";
+      canvas.style.height = "100vh";
+      gl.viewport(0, 0, w, h);
+    };
+    resize();
+    window.addEventListener("resize", resize);
+
+    return () => {
+      window.removeEventListener("resize", resize);
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      gl.deleteTexture(textureRef.current);
+      gl.deleteProgram(programRef.current);
+    };
+  }, []);
+
+  const uploadTexture = useCallback((snapCanvas: HTMLCanvasElement) => {
+    const gl = glRef.current;
+    if (!gl || !textureRef.current) return;
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, textureRef.current);
+    gl.texImage2D(
+      gl.TEXTURE_2D,
+      0,
+      gl.RGBA,
+      gl.RGBA,
+      gl.UNSIGNED_BYTE,
+      snapCanvas
+    );
+  }, []);
+
+  const captureSnapshot = useCallback((): Promise<HTMLCanvasElement> => {
+    // If already capturing, return the same promise
+    if (capturingRef.current) return capturingRef.current;
+
+    const scale = Math.min(1.5, window.devicePixelRatio || 1);
+    const promise = html2canvas(document.documentElement, {
+      backgroundColor: null,
+      scale,
+      useCORS: true,
+      windowWidth: window.innerWidth,
+      windowHeight: window.innerHeight,
+      scrollX: window.scrollX,
+      scrollY: window.scrollY,
+    }).then((snap) => {
+      // Normalize to canvas DPR size
+      const dpr = dprRef.current;
+      const out = document.createElement("canvas");
+      const w = Math.floor(window.innerWidth * dpr);
+      const h = Math.floor(window.innerHeight * dpr);
+      out.width = w;
+      out.height = h;
+      const ctx = out.getContext("2d")!;
+      ctx.drawImage(snap, 0, 0, snap.width, snap.height, 0, 0, w, h);
+      lastSnapshotRef.current = out;
+      return out;
+    }).finally(() => {
+      capturingRef.current = null;
+    });
+
+    capturingRef.current = promise;
+    return promise;
+  }, []);
+
+  const drawFrame = useCallback(() => {
+    const gl = glRef.current;
+    const canvas = canvasRef.current;
+    if (!gl || !canvas) return;
+
+    rafRef.current = requestAnimationFrame(drawFrame);
+
+    const tSec = (performance.now() - startTimeRef.current) / 1000;
+
+    gl.useProgram(programRef.current);
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+
+    const u = uniformsRef.current;
+    gl.uniform1i(u.u_tex, 0);
+    gl.uniform2f(u.u_res, canvas.width, canvas.height);
+    gl.uniform2f(u.u_center, centerUVRef.current.x, centerUVRef.current.y);
+    gl.uniform1f(u.u_time, tSec);
+    gl.uniform1f(u.u_duration, effective.duration);
+    gl.uniform1f(u.u_strength, effective.strength * dprRef.current);
+    gl.uniform1f(u.u_speed, effective.speed);
+    gl.uniform1f(u.u_width, effective.width);
+
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+    if (tSec >= effective.duration) {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+      animatingRef.current = false;
+      // CSS fade safety, though shader alpha already fades
+      canvas.style.opacity = "0";
+    }
+  }, [effective.duration, effective.speed, effective.strength, effective.width]);
+
+  const triggerRipple: RippleTrigger = useCallback(({ clientX, clientY }) => {
+    if (!motionEnabled) return;
+
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    centerUVRef.current = { x: clientX / w, y: 1 - clientY / h };
+
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    // Start anim
+    canvas.style.opacity = "1";
+    canvas.style.transition = "opacity 200ms ease-out";
+    startTimeRef.current = performance.now();
+    if (!rafRef.current) rafRef.current = requestAnimationFrame(drawFrame);
+
+    // Reuse last snapshot if available, otherwise capture; if capturing, upload when done
+    if (lastSnapshotRef.current) {
+      uploadTexture(lastSnapshotRef.current);
+    }
+    captureSnapshot().then((snap) => {
+      uploadTexture(snap);
+    });
+  }, [captureSnapshot, drawFrame, motionEnabled, uploadTexture]);
+
+  // Global pointer trigger (click/tap anywhere)
+  useEffect(() => {
+    const onPointer = (e: PointerEvent) => {
+      triggerRipple({ clientX: e.clientX, clientY: e.clientY });
+    };
+    window.addEventListener("pointerdown", onPointer, { passive: true });
+    return () => window.removeEventListener("pointerdown", onPointer);
+  }, [triggerRipple]);
+
+  return (
+    <RippleContext.Provider value={{ triggerRipple, enabled: motionEnabled, config: effective }}>
+      {children}
+      <canvas
+        ref={canvasRef}
+        className="fixed inset-0 pointer-events-none z-[9999] select-none"
+        aria-hidden
+      />
+    </RippleContext.Provider>
+  );
+};
