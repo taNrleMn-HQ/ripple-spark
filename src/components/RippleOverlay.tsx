@@ -307,6 +307,9 @@ export const RippleOverlay: React.FC<RippleOverlayProps> = ({ children, config }
           animatingRef.current = false;
           fadeStartedRef.current = false;
           canvas.removeEventListener("transitionend", onFade as any);
+
+          // Prep the next tap with a fresh snapshot (keeps grid and layout in sync)
+          captureSnapshot().then(uploadTexture).catch(() => {});
         };
         canvas.addEventListener("transitionend", onFade as any, { once: true } as any);
       }
@@ -406,6 +409,32 @@ export const RippleOverlay: React.FC<RippleOverlayProps> = ({ children, config }
     window.addEventListener("pointerdown", onPointer, { passive: true });
     return () => window.removeEventListener("pointerdown", onPointer);
   }, [triggerRipple]);
+
+  // Keep snapshot fresh when viewport changes and overlay is hidden
+  useEffect(() => {
+    const vv = window.visualViewport;
+    const maybeSnap = () => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      if (!animatingRef.current && (canvas.style.opacity === "" || canvas.style.opacity === "0")) {
+        captureSnapshot().then(uploadTexture).catch(() => {});
+      }
+    };
+    window.addEventListener("resize", maybeSnap);
+    window.addEventListener("scroll", maybeSnap, { passive: true } as any);
+    if (vv) {
+      vv.addEventListener("resize", maybeSnap);
+      vv.addEventListener("scroll", maybeSnap);
+    }
+    return () => {
+      window.removeEventListener("resize", maybeSnap);
+      window.removeEventListener("scroll", maybeSnap as any);
+      if (vv) {
+        vv.removeEventListener("resize", maybeSnap);
+        vv.removeEventListener("scroll", maybeSnap);
+      }
+    };
+  }, [captureSnapshot, uploadTexture]);
 
   return (
     <RippleContext.Provider value={{ triggerRipple, enabled: motionEnabled, config: effective }}>
