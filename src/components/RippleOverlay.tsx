@@ -4,6 +4,10 @@ import { RippleContext, RIPPLE_DEFAULTS, RippleConfig, RippleTrigger } from "@/h
 import { rippleVertex, rippleFragment } from "@/lib/shaders/ripple";
 import { createPortal } from "react-dom";
 
+// Debug grid overlay parameters
+const GRID_COLOR = "rgba(255, 255, 255, 0.15)";
+const GRID_SPACING_CSS_PX = 100;
+
 function getViewportMetrics() {
   const vv = window.visualViewport as VisualViewport | undefined;
   const DPR = Math.max(1, window.devicePixelRatio || 1);
@@ -254,7 +258,24 @@ export const RippleOverlay: React.FC<RippleOverlayProps> = ({ children, config }
       const sw = w;
       const sh = h;
 
+      // Draw the cropped page content
       ctx.drawImage(pageCanvas, sx, sy, sw, sh, 0, 0, w, h);
+
+      // Overlay debug grid (CSS px spacing scaled by DPR)
+      ctx.strokeStyle = GRID_COLOR;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      const spacing = GRID_SPACING_CSS_PX * d2;
+      for (let x = 0; x <= w; x += spacing) {
+        ctx.moveTo(x + 0.5, 0);
+        ctx.lineTo(x + 0.5, h);
+      }
+      for (let y = 0; y <= h; y += spacing) {
+        ctx.moveTo(0, y + 0.5);
+        ctx.lineTo(w, y + 0.5);
+      }
+      ctx.stroke();
+
       lastSnapshotRef.current = out;
       return out;
     }).finally(() => {
